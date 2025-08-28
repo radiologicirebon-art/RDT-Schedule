@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dashboard Radioterapi - RS Mitra Plumbon Cirebon</title>
+
+  <!-- Tailwind (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Flatpickr -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/id.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Firebase v9 modular (CDN) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js";
+    import {
+      getDatabase, ref, push, set, onValue, update, remove, child, get
+    } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-database.js";
+
+    window.firebaseEnv = { initializeApp, getDatabase, ref, push, set, onValue, update, remove, child, get };
+  </script>
+
+  <style>
+    /* small tweaks */
+    .fp-calendar { z-index: 50; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 p-6">
+
+  <div class="max-w-6xl mx-auto space-y-6">
+
+    <header class="flex items-center justify-between">
+      <h1 class="text-2xl font-semibold">Sistem Jadwal Radioterapi — RS Mitra Plumbon</h1>
+      <div class="text-sm text-slate-600">Realtime · Tailwind · Firebase RTDB</div>
+    </header>
+
+    <!-- FORM INPUT -->
+    <section class="bg-white p-6 rounded shadow">
+      <h2 class="font-semibold text-lg mb-3">Input Data Pasien</h2>
+      <form id="patientForm" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-sm">Nomor WhatsApp</label>
+          <input id="waNumber" class="mt-1 w-full border rounded p-2" placeholder="62812xxxxxxxx" required>
+        </div>
+        <div>
+          <label class="block text-sm">Nomor RM</label>
+          <input id="rmNumber" class="mt-1 w-full border rounded p-2" placeholder="No RM" required>
+        </div>
+        <div>
+          <label class="block text-sm">Nama</label>
+          <input id="name" class="mt-1 w-full border rounded p-2" placeholder="Nama pasien" required>
+        </div>
+
+        <div>
+          <label class="block text-sm">DPJP</label>
+          <input id="dpjp" class="mt-1 w-full border rounded p-2" placeholder="Dokter Penanggung Jawab">
+        </div>
+        <div>
+          <label class="block text-sm">Tanggal PB (Tanggal mulai)</label>
+          <input id="startDate" class="mt-1 w-full border rounded p-2" placeholder="Pilih tanggal mulai" required>
+        </div>
+        <div>
+          <label class="block text-sm">Jam Radiasi</label>
+          <select id="timeSlot" class="mt-1 w-full border rounded p-2">
+            <option>07.00 - 08.00</option>
+            <option>09.00 - 10.00</option>
+            <option>11.00 - 12.00</option>
+            <option>13.00 - 14.00</option>
+            <option>15.00 - 16.00</option>
+            <option>16.00 - 17.00</option>
+          </select>
+        </div>
+
+        <div class="md:col-span-2">
+          <label class="block text-sm">Diagnosis</label>
+          <input id="diagnosis" class="mt-1 w-full border rounded p-2" placeholder="Diagnosis singkat">
+        </div>
+
+        <div>
+          <label class="block text-sm">Rencana Jumlah Radiasi (sesi)</label>
+          <input id="sessionsCount" type="number" min="1" max="99" class="mt-1 w-full border rounded p-2" value="10" required>
+        </div>
+
+        <div class="md:col-span-3">
+          <label class="block text-sm">Pilih tanggal (opsional) — multi select (jika kosong sistem otomatis isi)</label>
+          <input id="datePicker" class="mt-1 w-full border rounded p-2" placeholder="Klik untuk pilih tanggal">
+          <p class="text-xs text-slate-500 mt-1">Jika kamu pilih beberapa tanggal, sistem akan gunakan tanggal itu. Bila jumlah tanggal < sesi, sistem tambahkan tanggal berikutnya yang tersedia hingga tercapai.</p>
+        </div>
+<div class="md:col-span-3 flex gap-3 items-center">
+  <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded">Simpan & Buat Jadwal</button>
+  <button id="previewScheduleBtn" type="button" class="bg-slate-200 px-4 py-2 rounded">Preview Jadwal Otomatis</button>
+
+  <!-- Checkbox kirim WA otomatis -->
+  <label class="flex items-center text-sm ml-2">
+    <input type="checkbox" id="autoSendWa" class="mr-2" checked>
+    Kirim WA otomatis
+  </label>
+
+  <button id="clearForm" type="button" class="ml-auto text-sm text-red-600">Bersihkan</button>
+</div>
+        <div class="md:col-span-3 flex gap-3">
+          <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded">Simpan & Buat Jadwal</button>
+          <button id="previewScheduleBtn" type="button" class="bg-slate-200 px-4 py-2 rounded">Preview Jadwal Otomatis</button>
+          <button id="clearForm" type="button" class="ml-auto text-sm text-red-600">Bersihkan</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- DAILY SCHEDULE + ACTIONS -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="bg-white p-6 rounded shadow">
+        <h2 class="font-semibold text-lg mb-3">Tabel Jadwal Harian</h2>
+
+        <div class="flex gap-3 items-center mb-4">
+          <label class="text-sm">Pilih Tanggal:</label>
+          <input id="viewDate" class="border p-2 rounded" placeholder="YYYY-MM-DD">
+          <button id="refreshDay" class="bg-slate-200 px-3 py-1 rounded">Refresh</button>
+        </div>
+
+        <div id="dayWarning" class="hidden mb-2 text-sm text-red-600"></div>
+
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="text-left">
+              <th class="py-2">Jam</th>
+              <th>Nama (RM)</th>
+              <th>DPJP</th>
+              <th>Diagnosa</th>
+              <th>Status</th>
+              <th>Aksi</th>
+            </tr>
+          </thead>
+          <tbody id="dayTableBody" class="divide-y"></tbody>
+        </table>
+      </div>
+
+      <!-- DASHBOARD -->
+      <div class="bg-white p-6 rounded shadow">
+        <h2 class="font-semibold text-lg mb-3">Dashboard Ringkasan</h2>
+        <div class="flex gap-4 mb-4">
+          <div class="p-4 bg-slate-50 rounded shadow-sm flex-1">
+            <div class="text-sm text-slate-500">Total pasien hari ini</div>
+            <div id="totalToday" class="text-2xl font-semibold">0</div>
+          </div>
+          <div class="p-4 bg-slate-50 rounded shadow-sm flex-1">
+            <div class="text-sm text-slate-500">Total sesi bulan ini</div>
+            <div id="totalMonth" class="text-2xl font-semibold">0</div>
+          </div>
+        </div>
+
+        <canvas id="monthlyChart" height="160"></canvas>
+        <div class="mt-4">
+          <h3 class="font-medium">Status pasien (Rekap)</h3>
+          <ul id="statusSummary" class="mt-2 text-sm space-y-1"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- MODALS: WA PREVIEW -->
+    <div id="waPreviewModal" class="fixed inset-0 hidden items-center justify-center bg-black/40 z-50">
+      <div class="bg-white rounded p-5 w-full max-w-lg">
+        <h3 class="font-semibold mb-2">Preview Pesan WhatsApp</h3>
+        <div id="waPreviewContent" class="border rounded p-3 bg-slate-50 text-sm h-36 overflow-auto"></div>
+        <div class="mt-4 flex justify-end gap-2">
+          <button id="waCancel" class="px-4 py-2 rounded border">Batal</button>
+          <button id="waSend" class="px-4 py-2 bg-green-600 text-white rounded">Kirim via wa.me</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Small utilities -->
+    <div class="flex gap-3">
+      <button id="downloadBackup" class="bg-slate-200 px-3 py-2 rounded text-sm">Download Backup JSON (local)</button>
+      <button id="clearHistory" class="bg-red-600 text-white px-3 py-2 rounded text-sm">Hapus Riwayat (DB)</button>
+    </div>
+
+    <footer class="text-xs text-slate-500 mt-6">Catatan: Sistem menggunakan WA via <code>wa.me/</code> default. Untuk integrasi WhatsApp Business API, edit fungsi JavaScript `sendWhatsApp()`.</footer>
+  </div>
+
+  <!-- SCRIPT (main) -->
+  <script type="module">
+    import {
+      initializeApp
+    } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js";
+    import {
+      getDatabase, ref, push, set, onValue, update, remove, child, get
+    } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-database.js";
+
+    // ---------- CONFIG: sesuaikan bila perlu ----------
+    const firebaseConfig = {
+      apiKey: "AIzaSyBV4X64Aecg7n0QKLDeB_ECNMtbH22Dshk",
+      authDomain: "radioterapi-rsmp.firebaseapp.com",
+      databaseURL: "https://radioterapi-rsmp-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "radioterapi-rsmp",
+      storageBucket: "radioterapi-rsmp.appspot.com",
+      messagingSenderId: "123456789",
+      appId: "1:123456789:web:abcdefg"
+    };
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    // ---------- Holidays (example list) ----------
+    // Update/extend daftar libur nasional jika perlu
+    const HOLIDAYS = [
+      "2025-01-01","2025-02-07","2025-03-29","2025-04-18","2025-05-01","2025-06-01","2025-08-17","2025-12-25"
+    ];
+
+    // ---------- Helper ----------
+    const toISODate = d => {
+      const dd = new Date(d);
+      return dd.toISOString().slice(0,10);
+    };
+    const formatIndoLong = (iso) => {
+      const d = new Date(iso);
+      return d.toLocaleDateString('id-ID', {day:'numeric', month:'long', year:'numeric'});
+    };
+
+    // ---------- Flatpickr setup ----------
+    flatpickr.localize(flatpickr.l10ns.id);
+    const datePicker = flatpickr("#datePicker", {
+      mode: "multiple",
+      dateFormat: "Y-m-d",
+      locale: "id",
+      disable: [
+        function(date) {
+          // disable Sundays
+          return (date.getDay() === 0);
+        },
+        ...HOLIDAYS.map(d=>new Date(d))
+      ],
+    });
+
+    const startPicker = flatpickr("#startDate", {
+      dateFormat: "Y-m-d",
+      locale: "id",
+      disable: [
+        function(date) {
+          return (date.getDay() === 0);
+        },
+        ...HOLIDAYS.map(d=>new Date(d))
+      ],
+    });
+
+    const viewPicker = flatpickr("#viewDate", {
+      dateFormat: "Y-m-d",
+      defaultDate: new Date(),
+      locale: "id",
+      disable: [
+        function(date) {
+          return false; // allow selection any day for viewing even sunday
+        }
+      ]
+    });
+
+    // ---------- State ----------
+    let lastPreviewSchedule = null; // store preview generated schedule
+
+    // ---------- Form submit ----------
+    document.getElementById('patientForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const wa = document.getElementById('waNumber').value.trim();
+      const rm = document.getElementById('rmNumber').value.trim();
+      const name = document.getElementById('name').value.trim();
+      const dpjp = document.getElementById('dpjp').value.trim();
+      const startDateVal = document.getElementById('startDate').value;
+      const diagnosis = document.getElementById('diagnosis').value.trim();
+      const sessions = parseInt(document.getElementById('sessionsCount').value, 10) || 1;
+      const timeslot = document.getElementById('timeSlot').value;
+      const selectedDates = datePicker.selectedDates.map(d => toISODate(d));
+
+      if (!wa || !rm || !name || !startDateVal) {
+        alert('Lengkapi Nomor WA, RM, Nama, dan Tanggal PB.');
+        return;
+      }
+
+      // generate schedule (array of {date, timeslot})
+      const schedule = await generateSchedule({
+        startDate: startDateVal,
+        sessions,
+        preferredDates: selectedDates,
+        timeslot
+      });
+
+      // store patient record + schedules
+      const patientRef = push(ref(db, 'patients'));
+      const patientId = patientRef.key;
+      const timestamp = new Date().toISOString();
+
+      const patientData = {
+        createdAt: timestamp,
+        wa, rm, name, dpjp, startDate: startDateVal, diagnosis,
+        sessionsPlanned: sessions,
+        schedule, status: 'Menunggu'
+      };
+
+      await set(patientRef, patientData);
+
+      // For each scheduled date, add to day-schedule node
+      for (const s of schedule) {
+        const dayKey = s.date; // YYYY-MM-DD
+        const dayRef = ref(db, `schedule/${dayKey}`);
+        // read current day items
+        const snap = await get(child(ref(db), `schedule/${dayKey}`));
+        let arr = [];
+        if (snap.exists()) arr = Object.entries(snap.val()).map(([k,v])=>({id:k,...v}));
+        // push new item
+        const newItemRef = push(ref(db, `schedule/${dayKey}`));
+        await set(newItemRef, {
+          patientId, name, rm, dpjp, diagnosis, timeslot: s.timeslot, status: 'Menunggu'
+        });
+      }
+
+      alert('Data pasien dan jadwal berhasil disimpan.');
+      document.getElementById('patientForm').reset();
+      datePicker.clear();
+    });
+
+    // Preview schedule button
+    document.getElementById('previewScheduleBtn').addEventListener('click', async () => {
+      const startDateVal = document.getElementById('startDate').value;
+      const sessions = parseInt(document.getElementById('sessionsCount').value, 10) || 1;
+      const timeslot = document.getElementById('timeSlot').value;
+      const selectedDates = datePicker.selectedDates.map(d => toISODate(d));
+
+      if (!startDateVal) {
+        alert('Pilih Tanggal PB (tanggal mulai) terlebih dahulu.');
+        return;
+      }
+
+      const schedule = await generateSchedule({
+        startDate: startDateVal,
+        sessions,
+        preferredDates: selectedDates,
+        timeslot
+      });
+
+      lastPreviewSchedule = schedule;
+      showSchedulePreviewModal(schedule);
+    });
+
+    // Clear form
+    document.getElementById('clearForm').addEventListener('click', () => {
+      document.getElementById('patientForm').reset();
+      datePicker.clear();
+    });
+
+    // ---------- Generate schedule logic ----------
+    /**
+     * options: { startDate (YYYY-MM-DD), sessions (int), preferredDates: [yyyy-mm-dd], timeslot }
+     * returns: [{date: 'YYYY-MM-DD', timeslot}, ...] length == sessions
+     */
+    async function generateSchedule(options) {
+      const { startDate, sessions, preferredDates = [], timeslot } = options;
+      const result = [];
+
+      // Use preferredDates first (must be valid (not sunday/holiday))
+      const validPreferred = preferredDates.filter(d => {
+        const dt = new Date(d);
+        const iso = toISODate(dt);
+        if (dt.getDay() === 0) return false;
+        if (HOLIDAYS.includes(iso)) return false;
+        return true;
+      });
+
+      for (const d of validPreferred) {
+        if (result.length >= sessions) break;
+        result.push({ date: d, timeslot });
+      }
+
+      // If still need more -> auto-fill next available days (skipping Sundays & holidays)
+      let cursor = new Date(startDate);
+      // ensure start cursor not sunday/holiday
+      function advanceOneDay() { cursor.setDate(cursor.getDate() + 1); }
+      while (result.length < sessions) {
+        const iso = toISODate(cursor);
+        // skip if already in result
+        if (!result.find(r => r.date === iso)) {
+          if (cursor.getDay() !== 0 && !HOLIDAYS.includes(iso)) {
+            // check daily capacity (max 26)
+            const count = await countPatientsOnDate(iso);
+            if (count < 26) {
+              result.push({ date: iso, timeslot });
+            } else {
+              // full day: skip (could later add logic to auto-shift)
+              console.warn('Hari penuh, skip', iso);
+            }
+          }
+        }
+        advanceOneDay();
+        // safety: prevent infinite loop (but realistically won't)
+        if (cursor.getFullYear() > 2030) break;
+      }
+
+      return result.slice(0, sessions);
+    }
+
+    async function countPatientsOnDate(isoDate) {
+      const snap = await get(child(ref(db), `schedule/${isoDate}`));
+      if (!snap.exists()) return 0;
+      return Object.keys(snap.val()).length;
+    }
+
+    // ---------- WA preview modal ----------
+    function showSchedulePreviewModal(schedule) {
+      const cont = document.getElementById('waPreviewContent');
+      cont.innerHTML = '';
+      const name = document.getElementById('name').value || '[Nama]';
+      const timeslot = document.getElementById('timeSlot').value;
+      // group by month for friendly text
+      const byMonth = {};
+      for (const s of schedule) {
+        const d = new Date(s.date);
+        const m = d.toLocaleString('id-ID', { month: 'long', year: 'numeric' });
+        if (!byMonth[m]) byMonth[m] = [];
+        byMonth[m].push(d.getDate());
+      }
+      let text = `Salam Sehat Halo ${name},\nJadwal radioterapi Anda: \n`;
+      for (const [month, days] of Object.entries(byMonth)) {
+        text += `${days.join(', ')} ${month}\n`;
+      }
+      text += `Jam ${timeslot}\nMohon hadir tepat waktu.`;
+      cont.textContent = text;
+      document.getElementById('waPreviewModal').classList.remove('hidden');
+      document.getElementById('waPreviewModal').classList.add('flex');
+    }
+
+    document.getElementById('waCancel').addEventListener('click', () => {
+      document.getElementById('waPreviewModal').classList.add('hidden');
+      document.getElementById('waPreviewModal').classList.remove('flex');
+    });
+
+    // Send WA -> opens wa.me with prefilled message
+    document.getElementById('waSend').addEventListener('click', () => {
+      const wa = document.getElementById('waNumber').value.trim();
+      const cont = document.getElementById('waPreviewContent').textContent;
+      if (!wa) { alert('Nomor WA kosong'); return; }
+      const url = `https://wa.me/${encodeURIComponent(wa)}?text=${encodeURIComponent(cont)}`;
+      // open in new tab
+      window.open(url, '_blank');
+      document.getElementById('waPreviewModal').classList.add('hidden');
+      document.getElementById('waPreviewModal').classList.remove('flex');
+    });
+
+    // ---------- View day table ----------
+    async function renderDay(dateISO) {
+      const tbody = document.getElementById('dayTableBody');
+      tbody.innerHTML = '';
+      const warning = document.getElementById('dayWarning');
+      const snap = await get(child(ref(db), `schedule/${dateISO}`));
+      if (!snap.exists()) {
+        tbody.innerHTML = `<tr><td colspan="6" class="py-4 text-sm text-slate-500">Tidak ada pasien pada tanggal ${dateISO}</td></tr>`;
+        document.getElementById('totalToday').textContent = '0';
+        return;
+      }
+      const rows = Object.entries(snap.val()).map(([k,v])=>({id:k,...v}));
+      // show warning if >26 (should not happen due to checks)
+      if (rows.length > 26) {
+        warning.classList.remove('hidden');
+        warning.textContent = `Peringatan: ada ${rows.length} pasien (lebih dari 26). Silakan hapus atau pindahkan pasien.`;
+      } else {
+        warning.classList.add('hidden');
+      }
+      // render
+      for (const r of rows) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="py-2">${r.timeslot}</td>
+          <td>${r.name} <div class="text-xs text-slate-400">${r.rm}</div></td>
+          <td>${r.dpjp || '-'}</td>
+          <td>${r.diagnosis || '-'}</td>
+          <td><select data-id="${r.id}" data-date="${dateISO}" class="statusSelect border rounded p-1 text-sm">
+                <option ${r.status==='Menunggu'?'selected':''}>Menunggu</option>
+                <option ${r.status==='Diperiksa'?'selected':''}>Diperiksa</option>
+                <option ${r.status==='Selesai'?'selected':''}>Selesai</option>
+              </select></td>
+          <td>
+            <button data-id="${r.id}" data-date="${dateISO}" class="moveBtn text-xs bg-slate-100 px-2 py-1 rounded">Pindah</button>
+            <button data-id="${r.id}" data-date="${dateISO}" class="delBtn text-xs text-red-600 ml-2">Hapus</button>
+            <button data-id="${r.id}" data-date="${dateISO}" class="waBtn text-xs text-emerald-600 ml-2">Kirim WA</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+      document.getElementById('totalToday').textContent = rows.length.toString();
+
+      // attach events
+      document.querySelectorAll('.statusSelect').forEach(sel => {
+        sel.addEventListener('change', async (e) => {
+          const status = e.target.value;
+          const id = e.target.dataset.id;
+          const date = e.target.dataset.date;
+          if (status === 'Selesai') {
+            // move item to riwayat and remove from schedule
+            const itemSnap = await get(child(ref(db), `schedule/${date}/${id}`));
+            if (itemSnap.exists()) {
+              const itemData = itemSnap.val();
+              // create riwayat entry
+              const histRef = push(ref(db, 'riwayat'));
+              await set(histRef, { ...itemData, finishedAt: new Date().toISOString(), originalDate: date });
+              // remove schedule item
+              await remove(child(ref(db), `schedule/${date}/${id}`));
+              renderDay(date);
+            }
+          } else {
+            // update status
+            await update(child(ref(db), `schedule/${date}/${id}`), { status });
+          }
+        });
+      });
+
+      document.querySelectorAll('.delBtn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const id = e.target.dataset.id;
+          const date = e.target.dataset.date;
+          if (!confirm('Hapus pasien dari jadwal?')) return;
+          await remove(child(ref(db), `schedule/${date}/${id}`));
+          renderDay(date);
+        });
+      });
+
+      document.querySelectorAll('.moveBtn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const id = e.target.dataset.id;
+          const date = e.target.dataset.date;
+          const newDate = prompt('Masukkan tanggal baru (YYYY-MM-DD):');
+          if (!newDate) return;
+          // read item
+          const itemSnap = await get(child(ref(db), `schedule/${date}/${id}`));
+          if (!itemSnap.exists()) return alert('Item tidak ditemukan');
+          const item = itemSnap.val();
+          // check capacity
+          const cnt = await countPatientsOnDate(newDate);
+          if (cnt >= 26) return alert('Tanggal baru penuh (26 pasien). Pilih tanggal lain.');
+          // add to new date
+          const newRef = push(ref(db, `schedule/${newDate}`));
+          await set(newRef, item);
+          // remove old
+          await remove(child(ref(db), `schedule/${date}/${id}`));
+          renderDay(date);
+        });
+      });
+
+      document.querySelectorAll('.waBtn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const id = e.target.dataset.id;
+          const date = e.target.dataset.date;
+          const itemSnap = await get(child(ref(db), `schedule/${date}/${id}`));
+          if (!itemSnap.exists()) return alert('Item tidak ditemukan');
+          const item = itemSnap.val();
+          // build message
+          const text = `Salam Sehat Halo ${item.name},\nJadwal radioterapi Anda: ${new Date(date).getDate()} ${new Date(date).toLocaleString('id-ID',{month:'long',year:'numeric'})}.\nJam ${item.timeslot}\nMohon hadir tepat waktu.`;
+          const waNum = prompt('Nomor WA tujuan (tanpa +):', (await get(child(ref(db), `patients/${item.patientId}`))).val()?.wa || '');
+          if (!waNum) return;
+          window.open(`https://wa.me/${encodeURIComponent(waNum)}?text=${encodeURIComponent(text)}`, '_blank');
+        });
+      });
+    }
+
+    document.getElementById('refreshDay').addEventListener('click', () => {
+      const date = document.getElementById('viewDate').value;
+      if (!date) return alert('Pilih tanggal untuk melihat jadwal');
+      renderDay(date);
+    });
+
+    // initial render today
+    const todayISO = new Date().toISOString().slice(0,10);
+    document.getElementById('viewDate').value = todayISO;
+    renderDay(todayISO);
+
+    // ---------- Dashboard: chart + summaries ----------
+    const ctx = document.getElementById('monthlyChart').getContext('2d');
+    const monthlyChart = new Chart(ctx, {
+      type: 'bar',
+      data: { labels: [], datasets: [{ label: 'Sesi per bulan', data: [] }]},
+      options: { responsive: true, maintainAspectRatio: false }
+    });
+
+    async function refreshDashboard() {
+      // compute counts for 12 months from now
+      const now = new Date();
+      const labels = [];
+      const data = [];
+      for (let i = 0; i < 12; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - 11 + i, 1);
+        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        labels.push(d.toLocaleString('id-ID', {month:'short', year:'numeric'}));
+        // sum number of schedule nodes where month matches
+        const snap = await get(ref(db, 'schedule'));
+        let count = 0;
+        if (snap.exists()) {
+          const all = snap.val();
+          for (const [dateKey, items] of Object.entries(all)) {
+            if (dateKey.startsWith(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)) {
+              count += Object.keys(items).length;
+            }
+          }
+        }
+        data.push(count);
+      }
+      monthlyChart.data.labels = labels;
+      monthlyChart.data.datasets[0].data = data;
+      monthlyChart.update();
+
+      // status summary
+      const snap = await get(ref(db, 'schedule'));
+      const statusCounts = { Menunggu:0, Diperiksa:0, Selesai:0 };
+      let totalMonth = 0;
+      if (snap.exists()) {
+        for (const [dateKey, items] of Object.entries(snap.val())) {
+          for (const [k,v] of Object.entries(items)) {
+            statusCounts[v.status] = (statusCounts[v.status]||0) + 1;
+            const d = new Date(dateKey);
+            if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
+              totalMonth++;
+            }
+          }
+        }
+      }
+      document.getElementById('statusSummary').innerHTML = `
+        <li>Menunggu: ${statusCounts.Menunggu || 0}</li>
+        <li>Diperiksa: ${statusCounts.Diperiksa || 0}</li>
+        <li>Selesai: ${statusCounts.Selesai || 0}</li>
+      `;
+      document.getElementById('totalMonth').textContent = totalMonth;
+    }
+
+    // listen to DB changes for live updates
+    onValue(ref(db, 'schedule'), () => {
+      refreshDashboard();
+      // also re-render current viewed day
+      const cur = document.getElementById('viewDate').value;
+      if (cur) renderDay(cur);
+    });
+
+    // ---------- Utilities ----------
+    document.getElementById('downloadBackup').addEventListener('click', async () => {
+      const snap = await get(ref(db));
+      const data = snap.exists() ? snap.val() : {};
+      const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `radioterapi-backup-${new Date().toISOString().slice(0,10)}.json`; a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    document.getElementById('clearHistory').addEventListener('click', async () => {
+      if (!confirm('Hapus semua riwayat (node /riwayat) di DB? Tindakan ini permanen.')) return;
+      await remove(ref(db, 'riwayat'));
+      alert('Riwayat dihapus.');
+    });
+
+    // initial dashboard load
+    refreshDashboard();
+
+  </script>
+</body>
+</html>
